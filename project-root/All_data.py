@@ -3,7 +3,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from shiny import App, ui, render
 import plotly.express as px
+import plotly.graph_objects as go
 import numpy as np
+from htmltools import tags
 
 # Load the dataset
 df = pd.read_csv("data/tiny_earth_2024.csv")
@@ -74,6 +76,46 @@ unique_zip_codes = sorted(df["Zip Code"].unique().astype(str))
 # Add "Total Isolates" option to ZIP codes
 zip_code_choices = ["Total Isolates"] + unique_zip_codes
 
+# Define the function to create the isolate viz UI
+def create_isolate_viz_ui():
+    return ui.div(
+        ui.h3("Interactive Isolate Characteristics Explorer"),
+        ui.div(
+            {"class": "row"},
+            ui.div(
+                {"class": "col-md-3"},
+                ui.div(
+                    {"style": "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-bottom: 10px;"},
+                    ui.h4("Display Options", {"style": "margin-top: 0;"}),
+                    ui.input_select(
+                        id="viz_type",
+                        label="Visualization Type:",
+                        choices=["Radar Chart", "Grouped Bar Chart", "Heatmap"],
+                        selected="Radar Chart"
+                    ),
+                    ui.input_select(
+                        id="grouping_var",
+                        label="Group By:",
+                        choices=["Zip Code", "Weather", "Description of vegetation"],
+                        selected="Zip Code"
+                    ),
+                    ui.input_checkbox_group(
+                        id="selected_characteristics",
+                        label="Select Characteristics:",
+                        choices=columns_of_interest,
+                        selected=columns_of_interest[:5]  # Select first 5 by default
+                    ),
+                    ui.p("This visualization shows the average values for selected isolate characteristics grouped by your chosen environmental factor.", 
+                         {"style": "font-style: italic; margin-top: 15px;"})
+                )
+            ),
+            ui.div(
+                {"class": "col-md-9"},
+                ui.output_ui("isolate_viz_output")
+            )
+        )
+    )
+
 # Define the UI
 app_ui = ui.page_fluid(
     ui.h2("Tiny Earth Explorer"),
@@ -142,6 +184,9 @@ app_ui = ui.page_fluid(
         ui.h3("Interactive Scatterplot"),
         ui.output_ui("interactive_scatterplot"),
         
+        # NEW: Add our custom isolate visualization component
+        create_isolate_viz_ui(),
+        
         ui.h3("Pie Chart for Isolates"),
         ui.output_plot("pie_chart", height="400px"),
 
@@ -152,6 +197,7 @@ app_ui = ui.page_fluid(
 
 # Define the server logic
 def server(input, output, session):
+    # Original server functions from the existing app
     @output
     @render.plot
     def zip_profile():
@@ -390,6 +436,30 @@ def server(input, output, session):
         plt.tight_layout(pad=5.0)
         return fig
 
- 
-# Combine UI and server into a Shiny app
-app = App(app_ui, server)
+    # NEW: Add the isolate visualization server logic
+    @output
+    @render.ui
+    def isolate_viz_output():
+        try:
+            # Get user selections
+            viz_type = input.viz_type()
+            grouping_var = input.grouping_var()
+            selected_chars = input.selected_characteristics()
+            
+            if not selected_chars:
+                return ui.div(
+                    {"style": "height: 400px; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd;"},
+                    "Please select at least one characteristic to visualize."
+                )
+                
+            # Ensure the grouping variable exists in the dataframe
+            if grouping_var not in df.columns:
+                return ui.div(
+                    {"style": "height: 400px; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd;"},
+                    f"The grouping variable '{grouping_var}' is not available in the dataset."
+                )
+                
+            # Group by the selected variable and calculate means for characteristics
+            grouped_data = df.groupby(grouping_var)[selected_chars].mean().reset_index()
+            
+            # For cleaner visualization, limit to
