@@ -34,14 +34,14 @@ available_env_factors = [col for col in environmental_factors if col in df.colum
 # All other columns that are not environmental factors or excluded will be isolate characteristics
 isolate_characteristics = [col for col in df.columns if col not in available_env_factors and col not in exclude_columns]
 
-# Create custom hover data template
-hover_template = "<b>Environmental Factors:</b><br>"
+# Create custom hover data template with styling
+hover_template = "<span style='font-weight:bold; color:#3498db; font-size:14px'>Environmental Factors:</span><br>"
 for col in available_env_factors:
-    hover_template += f"{col}: %{{customdata[{available_env_factors.index(col)}]}}<br>"
+    hover_template += f"<span style='font-weight:bold'>{col}:</span> %{{customdata[{available_env_factors.index(col)}]}}<br>"
 
-hover_template += "<br><b>Isolate Characteristics:</b><br>"
+hover_template += "<br><span style='font-weight:bold; color:#e74c3c; font-size:14px'>Isolate Characteristics:</span><br>"
 for col in isolate_characteristics:
-    hover_template += f"{col}: %{{customdata[{len(available_env_factors) + isolate_characteristics.index(col)}]}}<br>"
+    hover_template += f"<span style='font-weight:bold'>{col}:</span> %{{customdata[{len(available_env_factors) + isolate_characteristics.index(col)}]}}<br>"
 
 # Separate numerical and categorical columns for better selection options
 true_numerical_columns = [
@@ -71,6 +71,9 @@ columns_of_interest = [
 # Get unique ZIP codes for dropdown
 unique_zip_codes = sorted(df["Zip Code"].unique().astype(str))
 
+# Add "Total Isolates" option to ZIP codes
+zip_code_choices = ["Total Isolates"] + unique_zip_codes
+
 # Define the UI
 app_ui = ui.page_fluid(
     ui.h2("Tiny Earth Explorer"),
@@ -81,8 +84,8 @@ app_ui = ui.page_fluid(
             ui.input_select(
                 id="selected_zip",
                 label="Select ZIP Code:",
-                choices=unique_zip_codes,
-                selected=unique_zip_codes[0] if unique_zip_codes else None
+                choices=zip_code_choices,
+                selected="Total Isolates"  # Default to Total Isolates
             ),
             
             # Histogram controls
@@ -129,6 +132,7 @@ app_ui = ui.page_fluid(
         ui.output_plot("zip_profile", height="400px"),
         
         # Other plots follow
+        ui.h3("Histogram"),
         ui.output_plot("histogram", height="400px"),
         
         # Static scatterplot
@@ -155,40 +159,68 @@ def server(input, output, session):
         try:
             selected_zip = input.selected_zip()
             
-            # Filter data for the selected ZIP code
-            zip_data = df[df["Zip Code"].astype(str) == selected_zip]
+            # Handle "Total Isolates" option
+            if selected_zip == "Total Isolates":
+                # Use all data for Total Isolates
+                zip_data = df
+                title_text = "Total Isolates Across All ZIP Codes"
+            else:
+                # Filter data for the selected ZIP code
+                zip_data = df[df["Zip Code"].astype(str) == selected_zip]
+                title_text = f'ZIP Code {selected_zip}'
+                
+                if len(zip_data) == 0:
+                    plt.figure(figsize=(10, 6))
+                    plt.text(0.5, 0.5, f"No data available for ZIP code {selected_zip}", 
+                            horizontalalignment='center', verticalalignment='center', fontsize=14)
+                    plt.axis('off')
+                    return plt.gcf()
             
-            if len(zip_data) == 0:
-                plt.figure(figsize=(10, 6))
-                plt.text(0.5, 0.5, f"No data available for ZIP code {selected_zip}", 
-                        horizontalalignment='center', verticalalignment='center', fontsize=14)
-                plt.axis('off')
-                return plt.gcf()
+            # Get number of samples
+            num_samples = len(zip_data)
             
-            # Get means of numerical columns for the selected ZIP
-            zip_means = zip_data[true_numerical_columns].mean()
-            
-            # Get Temperature and CFUs/g values separately
-            temp_value = zip_means["Temperature"]
-            cfu_value = zip_means["CFUs/g"]
-            
-            # Filter out Temperature and CFUs/g for the bar chart
-            filtered_columns = [col for col in true_numerical_columns if col not in ["Temperature", "CFUs/g"]]
-            filtered_means = zip_means[filtered_columns]
+            # Get means of numerical columns for the selected ZIP or Total
+            if selected_zip == "Total Isolates":
+                # For Total Isolates, calculate sums of the isolate characteristics
+                isolate_values = zip_data[columns_of_interest].sum()
+                # Keep means for Temperature and CFUs/g
+                temp_value = zip_data["Temperature"].mean()
+                cfu_value = zip_data["CFUs/g"].mean()
+                
+                # Select filtered columns for the bar chart (all isolate characteristics)
+                filtered_columns = columns_of_interest
+                filtered_values = isolate_values[filtered_columns]
+                
+            else:
+                # For individual ZIP codes, calculate means as before
+                zip_means = zip_data[true_numerical_columns].mean()
+                
+                # Get Temperature and CFUs/g values separately
+                temp_value = zip_means["Temperature"]
+                cfu_value = zip_means["CFUs/g"]
+                
+                # Filter out Temperature and CFUs/g for the bar chart
+                filtered_columns = [col for col in true_numerical_columns if col not in ["Temperature", "CFUs/g"]]
+                filtered_values = zip_means[filtered_columns]
             
             # Select top 8 variables for better visualization
-            top_vars = filtered_means.nlargest(8).index.tolist()
+            top_vars = filtered_values.nlargest(8).index.tolist()
             
             # Create bar chart with larger figure size
             fig, ax = plt.subplots(figsize=(20, 8))
-            bars = ax.bar(top_vars, filtered_means[top_vars], color=plt.cm.viridis(np.linspace(0, 0.8, len(top_vars))))
+            bars = ax.bar(top_vars, filtered_values[top_vars], color=plt.cm.viridis(np.linspace(0, 0.8, len(top_vars))))
             
             # Improve readability with larger fonts
             plt.xticks(rotation=20, ha='right', fontsize=10)
             plt.yticks(fontsize=10)
-            plt.ylabel('Average Frequency of Isolates', fontsize=12)
-            plt.title(f'Average Frequency of Isolates for ZIP Code {selected_zip}', 
-                     size=14, pad=20)
+            
+            # Adjust y-axis label based on selection
+            if selected_zip == "Total Isolates":
+                plt.ylabel('Total Count of Isolates', fontsize=10)
+            else:
+                plt.ylabel('Average Frequency of Isolates', fontsize=10)
+                
+            plt.title(f'Isolate Profile for {title_text}', size=12, pad=20)
             
             # Add value labels on top of bars
             y_max = ax.get_ylim()[1]
@@ -196,19 +228,19 @@ def server(input, output, session):
                 height = rect.get_height()
                 if height > 0.85 * y_max:
                     ax.text(rect.get_x() + rect.get_width()/2., height * 0.9,
-                            f'{filtered_means[top_vars[i]]:.2f}',
+                            f'{filtered_values[top_vars[i]]:.1f}',
                             ha='center', va='top', color='white', fontsize=10)
                 else:
                     ax.text(rect.get_x() + rect.get_width()/2., height + 0.1,
-                            f'{filtered_means[top_vars[i]]:.2f}',
+                            f'{filtered_values[top_vars[i]]:.1f}',
                             ha='center', va='bottom', fontsize=10)
             
-            # Add Temperature and CFUs/g as text annotations
+            # Add Temperature, CFUs/g, and Number of samples as text annotations
             props = dict(boxstyle='round', facecolor='white', alpha=0.8)
-            text_str = f"Average Temperature: {temp_value:.2f}\nAverage CFUs/g: {cfu_value:.2f}"
+            text_str = f"Average Temperature: {temp_value:.2f}\nAverage CFUs/g: {cfu_value:.2f}\nNumber of samples: {num_samples}"
             ax.text(0.95, 0.95, text_str,
                 transform=ax.transAxes,
-                fontsize=11,
+                fontsize=10,
                 verticalalignment='top', 
                 horizontalalignment='right',
                 bbox=props)
@@ -231,20 +263,41 @@ def server(input, output, session):
         
         try:
             if var in categorical_columns:
+                # For categorical variables, use a horizontal bar chart with custom color
                 sns.countplot(y=df[var], color="skyblue", ax=ax)
-                plt.title(f"Count of {var}", pad=15)
+                plt.title(f"Distribution of {var}", pad=15)
                 plt.xlabel("Count", labelpad=10)
                 plt.ylabel(var, labelpad=10)
+                
+                # Add count labels to bars
+                for i, p in enumerate(ax.patches):
+                    width = p.get_width()
+                    ax.text(width + 1, p.get_y() + p.get_height()/2, 
+                            f'{int(width)}', 
+                            ha='left', va='center', fontsize=12)
             else:
-                sns.histplot(df[var], bins=20, kde=False, color="skyblue", edgecolor="black", ax=ax)
-                plt.title(f"Histogram of {var}", pad=15)
+                # For numerical variables, use a histogram with KDE
+                sns.histplot(df[var], bins=20, kde=True, color="skyblue", edgecolor="black", ax=ax)
+                plt.title(f"Distribution of {var}", pad=15)
                 plt.xlabel(var, labelpad=10)
                 plt.ylabel("Frequency", labelpad=10)
+                
+                # Add mean and median markers
+                mean_val = df[var].mean()
+                median_val = df[var].median()
+                plt.axvline(mean_val, color="#e74c3c", linestyle='dashed', linewidth=2, 
+                           label=f'Mean: {mean_val:.2f}')
+                plt.axvline(median_val, color="#2ecc71", linestyle='dotted', linewidth=2, 
+                           label=f'Median: {median_val:.2f}')
+                plt.legend(fontsize=12)
             
+            # Add grid for better readability
+            ax.grid(axis='y', linestyle='--', alpha=0.3)
+                
             plt.tight_layout(pad=2.0)
             return fig
         except Exception as e:
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=(8, 6), facecolor='white')
             plt.text(0.5, 0.5, f"Error in histogram: {str(e)}", 
                     horizontalalignment='center', verticalalignment='center')
             plt.axis('off')
@@ -257,25 +310,63 @@ def server(input, output, session):
             x_var = input.static_x()
             y_var = input.static_y()
             
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(10, 6), facecolor='white')
             
-            sns.scatterplot(data=df, x=x_var, y=y_var, color="blue", alpha=0.7, ax=ax)
+            # Create scatterplot with better styling
+            scatter = sns.scatterplot(
+                data=df, 
+                x=x_var, 
+                y=y_var, 
+                hue="Zip Code" if "Zip Code" in df.columns else None,
+                palette="viridis",
+                alpha=0.7, 
+                s=80,  # Larger point size
+                edgecolor='w',  # White edge for better visibility
+                linewidth=0.5,
+                ax=ax
+            )
             
+            # Add regression line if both variables are numerical
             if x_var in true_numerical_columns and y_var in true_numerical_columns:
                 try:
-                    sns.regplot(data=df, x=x_var, y=y_var, scatter=False, 
-                            color="red", line_kws={"linestyle": "--"}, ax=ax)
+                    sns.regplot(
+                        data=df, 
+                        x=x_var, 
+                        y=y_var, 
+                        scatter=False,
+                        color="#e74c3c", 
+                        line_kws={"linestyle": "--", "linewidth": 2},
+                        ax=ax
+                    )
+                    
+                    # Calculate and display correlation
+                    corr = df[x_var].corr(df[y_var])
+                    
+                    # Move correlation text to bottom right inside the plot
+                    ax.text(0.98, 0.45, f'Correlation: {corr:.2f}', 
+                           transform=ax.transAxes, 
+                           fontsize=12,
+                           ha='right',  # Right-aligned
+                           bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
                 except Exception as e:
                     print(f"Regression failed: {str(e)}")
-                    
-            plt.title(f"Static Scatterplot: {x_var} vs {y_var}", pad=15)
-            plt.xlabel(x_var, labelpad=10)
-            plt.ylabel(y_var, labelpad=10)
             
+            # Improve plot styling
+            plt.title(f"Relationship: {x_var} vs {y_var}", pad=15, fontsize=12)
+            plt.xlabel(x_var)
+            plt.ylabel(y_var)
+            
+            # Add grid for better readability
+            ax.grid(linestyle='--', alpha=0.3)
+            
+            # Improve legend if present
+            if scatter.get_legend() is not None:
+                scatter.get_legend().set_title("ZIP Code")
+                
             plt.tight_layout(pad=2.0)
             return fig
         except Exception as e:
-            plt.figure(figsize=(8, 6))
+            plt.figure(figsize=(8, 6), facecolor='white')
             plt.text(0.5, 0.5, f"Error in static scatterplot: {str(e)}", 
                     horizontalalignment='center', verticalalignment='center')
             plt.axis('off')
@@ -291,20 +382,71 @@ def server(input, output, session):
             # Prepare custom data for hover
             custom_data = df[available_env_factors + isolate_characteristics].values
             
-            # Create base scatter plot
+            # Create base scatter plot with enhanced styling
             fig = px.scatter(
                 df,
                 x=x_var,
                 y=y_var,
                 color="Zip Code",
-                title=f"Interactive Scatter Plot: {x_var} vs {y_var}"
+                title=f"Interactive Data Explorer: {x_var} vs {y_var}",
+                color_discrete_sequence=px.colors.qualitative.Bold,  # Use bold color scheme
+                size_max=15,  # Maximum marker size
+                opacity=0.75,  # Slight transparency
             )
             
-            # Update hover template with customdata
+            # Update hover template with customdata and styling
             fig.update_traces(
                 customdata=custom_data,
-                hovertemplate=hover_template
+                hovertemplate=hover_template,
+                marker=dict(
+                    line=dict(width=1, color='DarkSlateGrey')  # Add marker outline
+                )
             )
+            
+            # Enhance layout styling
+            fig.update_layout(
+                plot_bgcolor='white',  # White background
+                paper_bgcolor='white',  # White paper
+                font=dict(family="Segoe UI, Arial, sans-serif", size=12),  # Better font
+                title=dict(
+                    font=dict(size=18, color="#2c3e50"),
+                    x=0.5,  # Center title
+                ),
+                xaxis=dict(
+                    title=dict(font=dict(size=14, color="#2c3e50")),
+                    gridcolor='#f0f0f0',  # Lighter grid
+                    zerolinecolor='#e0e0e0',  # Zero line color
+                ),
+                yaxis=dict(
+                    title=dict(font=dict(size=14, color="#2c3e50")),
+                    gridcolor='#f0f0f0',  # Lighter grid
+                    zerolinecolor='#e0e0e0',  # Zero line color
+                ),
+                margin=dict(l=60, r=30, t=80, b=60),  # Better margins
+                legend=dict(
+                    title=dict(font=dict(size=14, color="#2c3e50")),
+                    bgcolor='rgba(255,255,255,0.8)',  # Semi-transparent background
+                    bordercolor='#e0e0e0',  # Border color
+                    borderwidth=1,
+                )
+            )
+            
+            # Add trendline if both variables are numerical
+            if x_var in true_numerical_columns and y_var in true_numerical_columns:
+                try:
+                    fig.update_layout(
+                        shapes=[
+                            dict(
+                                type='line',
+                                xref='x', yref='y',
+                                x0=df[x_var].min(), y0=df[y_var].min(),
+                                x1=df[x_var].max(), y1=df[y_var].max(),
+                                line=dict(color="#e74c3c", width=2, dash='dash')
+                            )
+                        ]
+                    )
+                except Exception as e:
+                    print(f"Trendline failed: {str(e)}")
             
             return ui.div(
                 {"style": "height:500px;"},
@@ -314,7 +456,7 @@ def server(input, output, session):
             )
         except Exception as e:
             return ui.div(
-                {"style": "height:500px; display:flex; align-items:center; justify-content:center;"},
+                {"style": "height:500px; display:flex; align-items:center; justify-content:center; background-color:white; border-radius:8px;"},
                 f"Error in interactive plot: {str(e)}"
             )
 
