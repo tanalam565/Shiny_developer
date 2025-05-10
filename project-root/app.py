@@ -431,23 +431,6 @@ def server(input, output, session):
                 )
             )
             
-            # Add trendline if both variables are numerical
-            if x_var in true_numerical_columns and y_var in true_numerical_columns:
-                try:
-                    fig.update_layout(
-                        shapes=[
-                            dict(
-                                type='line',
-                                xref='x', yref='y',
-                                x0=df[x_var].min(), y0=df[y_var].min(),
-                                x1=df[x_var].max(), y1=df[y_var].max(),
-                                line=dict(color="#e74c3c", width=2, dash='dash')
-                            )
-                        ]
-                    )
-                except Exception as e:
-                    print(f"Trendline failed: {str(e)}")
-            
             return ui.div(
                 {"style": "height:500px;"},
                 ui.HTML(
